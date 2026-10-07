@@ -1,6 +1,7 @@
 /* ============================================================
-   创作广场 · 视频   交互逻辑（实时直连版）
-   页面加载时：/api/works 取链接列表 → 逐条 /api/resolve 实时拉豆包
+   创作广场 · 视频   交互逻辑（自带账号·实时 feed 版）
+   未登录：读 /api/works 种子作品（免登录也能看）
+   已登录：用你的豆包登录态实时读 /api/feed 广场（满屏、持续更新）
    视频 / 封面都经 /api/stream 同域代理，绕开 CDN 防盗链与 CORS
    ============================================================ */
 (function () {
@@ -16,9 +17,11 @@
   };
 
   var TAB_NAME = { discover: "发现", video: "视频", ecom: "带货模板", pimg: "P图", pet: "萌宠" };
-  var state = { items: [], tab: "video", loading: false };
+  var state = { items: [], tab: "video", loading: false, token: "", cursor: "", live: false };
+  var TOKEN_KEY = "czs_token";
 
-  var app, grid, panel, panelTitle, panelSub, detail, toastEl, updatedEl, skeleton, addBtn, refreshBtn;
+  var app, grid, panel, panelTitle, panelSub, detail, toastEl, updatedEl, skeleton, addBtn, refreshBtn, loginBtn;
+  var loginEl, loginStatus, loginCookie, loginFetch, loginSubmit;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -250,51 +253,107 @@
       });
   }
 
-  function refresh() {
-    if (state.loading) return;
-    state.loading = true;
-    if (skeleton) skeleton.hidden = false;
-    fetchWorks()
-      .then(function (list) {
-        return Promise.all(list.map(resolveOne));
+  function fetchFeed(cursor) {
+    var u = "/api/feed?token=" + encodeURIComponent(state.token) +
+            "&count=20" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
+    return fetch(u, { cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 401) throw { need_login: true };
+        if (!r.ok) throw new Error("feed " + r.status);
+        return r.json();
       })
+      .then(function (j) {
+        if (j && j.need_login) throw { need_login: true, error: j.error };
+        return j;
+      });
+  }
+
+  function renderFeed(items, cursor) {
+    items = items || [];
+    items.forEach(function (it) { it.accent = accentOf(it.author); });
+    if (!state.live) {
+      // 首次 feed：替换种子
+      state.items = items;
+      state.live = true;
+    } else {
+      // 后续翻页：追加去重
+      var seen = {};
+      state.items.forEach(function (x) { seen[x.video || x.prompt] = 1; });
+      items.forEach(function (x) { if (!seen[x.video || x.prompt]) state.items.push(x); });
+    }
+    state.cursor = cursor || "";
+    if (skeleton) skeleton.remove();
+    if (loginEl) loginEl.hidden = true;
+    renderGrid();
+    updateMeta(state.items, null, true);
+  }
+
+  function loadSeed() {
+    return fetchWorks()
+      .then(function (list) { return Promise.all(list.map(resolveOne)); })
       .then(function (items) {
+        items.forEach(function (it) { it.accent = it.accent || accentOf(it.author); });
         state.items = items;
+        state.live = false;
         renderGrid();
-        updateMeta(items);
+        updateMeta(items, null, false);
         if (skeleton) skeleton.remove();
-        state.loading = false;
-        var m = /[?&]open=(\d+)/.exec(location.search);
-        if (m && state.items[+m[1]] && !state.items[+m[1]].__failed) openDetail(state.items[+m[1]]);
       })
       .catch(function () {
-        // 静态托管（如 GitHub Pages）没有 /api/works：退回读 videos.json
+        // 静态托管没有 /api/works：退回 videos.json
         return fetch("videos.json?t=" + Date.now(), { cache: "no-store" })
           .then(function (r) { return r.json(); })
           .then(function (j) {
             var items = (j && j.items) || [];
             items.forEach(function (it) { it.accent = it.accent || accentOf(it.author); });
             state.items = items;
+            state.live = false;
             renderGrid();
-            updateMeta(items, j && j.updated);
+            updateMeta(items, j && j.updated, false);
             if (skeleton) skeleton.remove();
-            state.loading = false;
           })
           .catch(function () {
             state.items = [];
             renderGrid();
             if (skeleton) skeleton.remove();
-            state.loading = false;
           });
       });
   }
 
-  function updateMeta(items, updated) {
+  function refresh() {
+    if (state.loading) return;
+    state.loading = true;
+    if (skeleton) { skeleton.hidden = false; }
+    if (state.token) {
+      // 已登录：优先实时 feed
+      fetchFeed("")
+        .then(function (j) { renderFeed(j.items || [], j.cursor); state.loading = false; })
+        .catch(function (e) {
+          if (e && e.need_login) {
+            // 登录态失效 -> 退回种子，并提示重新登录
+            state.token = ""; state.live = false;
+            try { localStorage.removeItem(TOKEN_KEY); } catch (x) {}
+            showLogin(e.error || "登录已过期，请重新登录");
+            return loadSeed().then(function () { state.loading = false; });
+          }
+          return loadSeed().then(function () { state.loading = false; });
+        });
+    } else {
+      loadSeed().then(function () { state.loading = false; });
+    }
+  }
+
+  function updateMeta(items, updated, isLive) {
     if (!updatedEl) return;
     var ok = items.filter(function (x) { return !x.__failed; }).length;
-    var fail = items.length - ok;
-    var s = "实时 · 共 " + ok + " 个作品 · 内容来自豆包公开分享";
-    if (fail) s += "（" + fail + " 个失效）";
+    var s;
+    if (isLive) {
+      s = "🔴 实时广场 · 共 " + ok + " 个作品（你的豆包账号）";
+    } else {
+      var fail = items.length - ok;
+      s = "实时 · 共 " + ok + " 个作品 · 内容来自豆包公开分享";
+      if (fail) s += "（" + fail + " 个失效）";
+    }
     if (updated) s += " · 更新于 " + updated;
     updatedEl.textContent = s;
     document.title = ok ? "创作广场 · 视频（" + ok + "）" : "创作广场 · 视频";
@@ -325,6 +384,47 @@
       .catch(function () { toast("添加失败，请确认服务在运行"); });
   }
 
+  /* ---------- 登录（用户自带豆包账号） ---------- */
+  function showLogin(msg) {
+    if (loginEl) loginEl.hidden = false;
+    if (loginStatus) {
+      loginStatus.textContent = msg || "登录后即可实时读取广场";
+      loginStatus.className = "login-status" + (msg ? " is-err" : "");
+    }
+  }
+
+  function setLoginStatus(msg, kind) {
+    if (!loginStatus) return;
+    loginStatus.textContent = msg || "";
+    loginStatus.className = "login-status" + (kind ? " is-" + kind : "");
+  }
+
+  function doLogin(cookie) {
+    setLoginStatus("正在验证登录…", null);
+    return fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cookie: cookie }),
+      cache: "no-store"
+    })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+      .then(function (res) {
+        var j = res.j || {};
+        if (j && j.ok && j.token) {
+          state.token = j.token;
+          state.live = false;
+          try { localStorage.setItem(TOKEN_KEY, j.token); } catch (e) {}
+          if (loginEl) loginEl.hidden = true;
+          toast("登录成功，正在拉取实时广场 ✓");
+          state.loading = false;
+          refresh();
+        } else {
+          showLogin((j && j.error) || "登录失败：请确认已登录 doubao.com 且 Cookie 有效");
+        }
+      })
+      .catch(function () { showLogin("登录请求失败，请确认服务在运行"); });
+  }
+
   function init() {
     app = document.getElementById("app");
     grid = document.getElementById("grid");
@@ -337,8 +437,43 @@
     skeleton = document.getElementById("skeleton");
     addBtn = document.getElementById("addBtn");
     refreshBtn = document.getElementById("refreshBtn");
+    loginBtn = document.getElementById("loginBtn");
+    loginEl = document.getElementById("login");
+    loginStatus = document.getElementById("loginStatus");
+    loginCookie = document.getElementById("loginCookie");
+    loginFetch = document.getElementById("loginFetch");
+    loginSubmit = document.getElementById("loginSubmit");
 
     app.appendChild(detail);
+
+    // 登录相关事件
+    if (loginSubmit) loginSubmit.addEventListener("click", function () {
+      var c = (loginCookie && loginCookie.value || "").trim();
+      if (!c) { setLoginStatus("请先粘贴 Cookie", "err"); return; }
+      doLogin(c);
+    });
+    if (loginFetch) loginFetch.addEventListener("click", function () {
+      showLogin("请先用下方方式提供登录态：先在 doubao.com 登录，再点『手动粘贴 Cookie』");
+      var more = document.getElementById("loginMore");
+      if (more) more.open = true;
+      setLoginStatus("提示：登录 doubao.com 后，按 F12 打开控制台，输入下面这行回车即可复制全部 Cookie：\ncopy(document.cookie)", null);
+    });
+
+    // 恢复上次的 token（12 小时内有效）
+    try { state.token = localStorage.getItem(TOKEN_KEY) || ""; } catch (e) {}
+    // 点登录图标：已登录就退出登录态，未登录就打开登录界面
+    if (loginBtn) loginBtn.addEventListener("click", function () {
+      if (state.token) {
+        state.token = ""; state.live = false;
+        try { localStorage.removeItem(TOKEN_KEY); } catch (x) {}
+        fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: "" }) }).catch(function () {});
+        toast("已退出登录，回到公开作品");
+        refresh();
+      } else {
+        showLogin("");
+      }
+    });
 
     document.getElementById("tabs").addEventListener("click", function (e) {
       var b = e.target.closest(".tab"); if (!b) return; setTab(b.dataset.tab);
@@ -371,6 +506,20 @@
     window.addEventListener("popstate", function () {
       if (!detail.hidden) { detail.hidden = true; detail.innerHTML = ""; }
     });
+
+    // 滚动到底自动加载更多（实时广场翻页）
+    var feed = document.getElementById("feed");
+    if (feed) {
+      feed.addEventListener("scroll", function () {
+        if (!state.live || !state.cursor || state.loading) return;
+        if (feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 400) {
+          state.loading = true;
+          fetchFeed(state.cursor)
+            .then(function (j) { renderFeed(j.items || [], j.cursor); state.loading = false; })
+            .catch(function () { state.loading = false; });
+        }
+      });
+    }
 
     setTab("video");
     refresh();
