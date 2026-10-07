@@ -3,6 +3,29 @@
 复刻**豆包手机端「视频创作广场」**的网页版：浏览器打开即刷别人的 AI 视频，
 每条都带**提示词（prompt）**和**生成效果**，**打开就是最新内容，不用先分享**。
 
+## 一键部署（点按钮就上线，手机浏览器直接开）
+
+- **[!Deploy to Render](https://render.com/deploy?repo=https://github.com/qianqianlaifeng/chuangzuo-square)** —— 用 Render 账号点一下，自动部署，给你一个 `https://xxx.onrender.com` 手机能开的网址。
+- **HuggingFace Spaces**：新建 Space → 选 **Docker** → 仓库填 `qianqianlaifeng/chuangzuo-square`，本仓库已带 `Dockerfile`。
+
+> 这两个平台都是**免费**的，且都支持运行 Python（会注入 `PORT` 环境变量，`server.py` 已适配）。
+> 部署完就是一个公网链接，手机浏览器直接打开即是实时广场。
+
+## 广场里有哪些视频？（重要说明）
+
+豆包**网页端没有公开的"创作广场信息流"接口**。实测结论：
+
+- `www.doubao.com/api/creativity/feed`（App 用的真 feed）→ **401，强制登录 Cookie**，游客进不去。
+- 全站只有 `get_video_share_info` 这一个**单条分享**接口能免鉴权取到视频+作者+提示词，
+  但必须 `share_id + video_id` 成对，**无法枚举**。
+
+所以广场内容目前由 `works.json` 维护（自带一条真实种子）。**查看者不需要自己分享**——
+打开网页就直接看到每条作品的实时数据。新增作品：
+
+- **网页里加**：点右上角 **＋**，粘贴豆包 App 里作品的分享链接（作品上点「分享 → 复制链接」），
+  即时上墙，视频和提示词当场从豆包拉取。
+- **直接改文件**：编辑根目录 `works.json`，加一项 `{"share_id":"...","vid":"..."}`，重启服务即生效。
+
 ## 它怎么做到「实时」
 
 豆包网页端没有公开的创作广场信息流接口，只有「单条分享」接口
