@@ -1,7 +1,7 @@
 /* ============================================================
-   创作广场 · 视频   交互逻辑（自带账号·实时 feed 版）
-   未登录：读 /api/works 种子作品（免登录也能看）
-   已登录：用你的豆包登录态实时读 /api/feed 广场（满屏、持续更新）
+   创作广场 · 视频   交互逻辑（站主共享登录态版）
+   访客：免登录直接打开就有内容。实时广场开了就拉 feed，没开就退回公开作品墙
+   站主：齿轮按钮进设置，贴一次豆包 Cookie，全站生效
    视频 / 封面都经 /api/stream 同域代理，绕开 CDN 防盗链与 CORS
    ============================================================ */
 (function () {
@@ -17,11 +17,10 @@
   };
 
   var TAB_NAME = { discover: "发现", video: "视频", ecom: "带货模板", pimg: "P图", pet: "萌宠" };
-  var state = { items: [], tab: "video", loading: false, token: "", cursor: "", live: false };
-  var TOKEN_KEY = "czs_token";
+  var state = { items: [], tab: "video", loading: false, cursor: "", live: false, liveAvailable: false };
 
-  var app, grid, panel, panelTitle, panelSub, detail, toastEl, updatedEl, skeleton, addBtn, refreshBtn, loginBtn;
-  var loginEl, loginStatus, loginCookie, loginFetch, loginSubmit;
+  var app, grid, panel, panelTitle, panelSub, detail, toastEl, updatedEl, skeleton, addBtn, refreshBtn, ownerBtn;
+  var ownerPanel, ownerState, ownerStatus, ownerCookie, ownerSubmit, ownerLogout, ownerClose;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -136,7 +135,7 @@
       grid.hidden = true;
       panel.hidden = false;
       panelTitle.textContent = "还没有收录作品";
-      panelSub.innerHTML = "点右上角 <b>＋</b> 粘贴豆包 App 里的分享链接（分享 → 复制链接），作品就会实时上墙，视频和提示词都是当场从豆包拉取的。";
+      panelSub.innerHTML = "点右上角 <b>＋</b> 粘贴豆包 App 里的分享链接（分享 → 复制链接），作品就会实时上墙，视频和提示词都是当场从豆包拉取的。站主也可以点右上角 <b>⚙️</b> 开启实时广场。";
       var b = document.getElementById("panelBack");
       b.textContent = "刷新看看";
       b.onclick = function () { refresh(); };
@@ -253,19 +252,26 @@
       });
   }
 
+  /* 问服务端实时广场要数据。访客不需要任何 token。 */
   function fetchFeed(cursor) {
-    var u = "/api/feed?token=" + encodeURIComponent(state.token) +
-            "&count=20" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
+    var u = "/api/feed?count=20" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
     return fetch(u, { cache: "no-store" })
       .then(function (r) {
-        if (r.status === 401) throw { need_login: true };
         if (!r.ok) throw new Error("feed " + r.status);
         return r.json();
       })
       .then(function (j) {
-        if (j && j.need_login) throw { need_login: true, error: j.error };
+        if (j && j.need_owner) throw { need_owner: true, error: j.error };
+        if (j && !j.ok) throw { need_owner: true, error: j.error || "实时广场暂时不可用" };
         return j;
       });
+  }
+
+  /* 问服务端：实时广场开了没 */
+  function fetchStatus() {
+    return fetch("/api/status?t=" + Date.now(), { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, live: false }; });
   }
 
   function renderFeed(items, cursor) {
@@ -283,7 +289,6 @@
     }
     state.cursor = cursor || "";
     if (skeleton) skeleton.remove();
-    if (loginEl) loginEl.hidden = true;
     renderGrid();
     updateMeta(state.items, null, true);
   }
@@ -324,23 +329,24 @@
     if (state.loading) return;
     state.loading = true;
     if (skeleton) { skeleton.hidden = false; }
-    if (state.token) {
-      // 已登录：优先实时 feed
-      fetchFeed("")
-        .then(function (j) { renderFeed(j.items || [], j.cursor); state.loading = false; })
-        .catch(function (e) {
-          if (e && e.need_login) {
-            // 登录态失效 -> 退回种子，并提示重新登录
-            state.token = ""; state.live = false;
-            try { localStorage.removeItem(TOKEN_KEY); } catch (x) {}
-            showLogin(e.error || "登录已过期，请重新登录");
-            return loadSeed().then(function () { state.loading = false; });
-          }
-          return loadSeed().then(function () { state.loading = false; });
-        });
-    } else {
-      loadSeed().then(function () { state.loading = false; });
-    }
+
+    fetchStatus()
+      .then(function (st) {
+        state.liveAvailable = !!(st && st.live);
+        if (state.liveAvailable) {
+          return fetchFeed("")
+            .then(function (j) { renderFeed(j.items || [], j.cursor); })
+            .catch(function () {
+              // 实时广场开着但这次拉失败（多半是站主 Cookie 过期），退回公开墙
+              state.live = false;
+              return loadSeed();
+            });
+        }
+        state.live = false;
+        return loadSeed();
+      })
+      .then(function () { state.loading = false; })
+      .catch(function () { state.loading = false; });
   }
 
   function updateMeta(items, updated, isLive) {
@@ -348,11 +354,12 @@
     var ok = items.filter(function (x) { return !x.__failed; }).length;
     var s;
     if (isLive) {
-      s = "🔴 实时广场 · 共 " + ok + " 个作品（你的豆包账号）";
+      s = "🔴 实时广场 · 共 " + ok + " 个作品 · 下拉继续加载更多";
     } else {
       var fail = items.length - ok;
-      s = "实时 · 共 " + ok + " 个作品 · 内容来自豆包公开分享";
+      s = "共 " + ok + " 个作品 · 来自豆包公开分享";
       if (fail) s += "（" + fail + " 个失效）";
+      s += " · 点右上角⚙️开启实时广场";
     }
     if (updated) s += " · 更新于 " + updated;
     updatedEl.textContent = s;
@@ -384,45 +391,76 @@
       .catch(function () { toast("添加失败，请确认服务在运行"); });
   }
 
-  /* ---------- 登录（用户自带豆包账号） ---------- */
-  function showLogin(msg) {
-    if (loginEl) loginEl.hidden = false;
-    if (loginStatus) {
-      loginStatus.textContent = msg || "登录后即可实时读取广场";
-      loginStatus.className = "login-status" + (msg ? " is-err" : "");
-    }
+  /* ---------- 站主设置：贴一次 Cookie，全站生效 ---------- */
+  function setOwnerStatus(msg, kind) {
+    if (!ownerStatus) return;
+    ownerStatus.textContent = msg || "";
+    ownerStatus.className = "login-status" + (kind ? " is-" + kind : "");
   }
 
-  function setLoginStatus(msg, kind) {
-    if (!loginStatus) return;
-    loginStatus.textContent = msg || "";
-    loginStatus.className = "login-status" + (kind ? " is-" + kind : "");
+  function openOwner() {
+    if (ownerPanel) ownerPanel.hidden = false;
+    setOwnerStatus("", null);
+    fetchStatus().then(function (st) {
+      if (!ownerState) return;
+      var live = !!(st && st.live);
+      ownerState.textContent = live ? "✅ 实时广场已开通，访客正看到实时内容" : "⚪️ 当前是公开作品墙（内容少，不是实时广场）";
+      ownerState.className = "login-live" + (live ? " is-on" : "");
+      if (ownerLogout) ownerLogout.hidden = !live;
+    });
   }
 
-  function doLogin(cookie) {
-    setLoginStatus("正在验证登录…", null);
-    return fetch("/api/login", {
+  function closeOwner() {
+    if (ownerPanel) ownerPanel.hidden = true;
+  }
+
+  function submitOwner() {
+    var c = (ownerCookie && ownerCookie.value || "").trim();
+    if (!c) { setOwnerStatus("请先把 Cookie 粘贴到上面的输入框", "err"); return; }
+    setOwnerStatus("正在验证并拉取广场，请稍候…", null);
+    if (ownerSubmit) ownerSubmit.disabled = true;
+    fetch("/api/owner/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cookie: cookie }),
+      body: JSON.stringify({ cookie: c }),
       cache: "no-store"
     })
-      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
-      .then(function (res) {
-        var j = res.j || {};
-        if (j && j.ok && j.token) {
-          state.token = j.token;
-          state.live = false;
-          try { localStorage.setItem(TOKEN_KEY, j.token); } catch (e) {}
-          if (loginEl) loginEl.hidden = true;
-          toast("登录成功，正在拉取实时广场 ✓");
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (ownerSubmit) ownerSubmit.disabled = false;
+        if (j && j.ok) {
+          setOwnerStatus("已开启！拉到 " + (j.count || 0) + " 条实时内容", "ok");
+          if (ownerCookie) ownerCookie.value = "";
+          if (ownerLogout) ownerLogout.hidden = false;
+          if (ownerState) {
+            ownerState.textContent = "✅ 实时广场已开通，访客正看到实时内容";
+            ownerState.className = "login-live is-on";
+          }
+          toast("实时广场已开启 ✓");
           state.loading = false;
+          state.live = false;
           refresh();
+          setTimeout(closeOwner, 1200);
         } else {
-          showLogin((j && j.error) || "登录失败：请确认已登录 doubao.com 且 Cookie 有效");
+          setOwnerStatus((j && j.error) || "验证失败，请确认 Cookie 来自已登录的 doubao.com", "err");
         }
       })
-      .catch(function () { showLogin("登录请求失败，请确认服务在运行"); });
+      .catch(function () {
+        if (ownerSubmit) ownerSubmit.disabled = false;
+        setOwnerStatus("请求失败，请确认服务在运行", "err");
+      });
+  }
+
+  function logoutOwner() {
+    fetch("/api/owner/logout", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: "{}" })
+      .then(function () {
+        toast("已关闭实时广场，回到公开作品墙");
+        state.live = false;
+        closeOwner();
+        refresh();
+      })
+      .catch(function () { setOwnerStatus("关闭失败，请确认服务在运行", "err"); });
   }
 
   function init() {
@@ -437,42 +475,29 @@
     skeleton = document.getElementById("skeleton");
     addBtn = document.getElementById("addBtn");
     refreshBtn = document.getElementById("refreshBtn");
-    loginBtn = document.getElementById("loginBtn");
-    loginEl = document.getElementById("login");
-    loginStatus = document.getElementById("loginStatus");
-    loginCookie = document.getElementById("loginCookie");
-    loginFetch = document.getElementById("loginFetch");
-    loginSubmit = document.getElementById("loginSubmit");
+    ownerBtn = document.getElementById("ownerBtn");
+    ownerPanel = document.getElementById("ownerPanel");
+    ownerState = document.getElementById("ownerState");
+    ownerStatus = document.getElementById("ownerStatus");
+    ownerCookie = document.getElementById("ownerCookie");
+    ownerSubmit = document.getElementById("ownerSubmit");
+    ownerLogout = document.getElementById("ownerLogout");
+    ownerClose = document.getElementById("ownerClose");
 
     app.appendChild(detail);
 
-    // 登录相关事件
-    if (loginSubmit) loginSubmit.addEventListener("click", function () {
-      var c = (loginCookie && loginCookie.value || "").trim();
-      if (!c) { setLoginStatus("请先粘贴 Cookie", "err"); return; }
-      doLogin(c);
-    });
-    if (loginFetch) loginFetch.addEventListener("click", function () {
-      showLogin("请先用下方方式提供登录态：先在 doubao.com 登录，再点『手动粘贴 Cookie』");
-      var more = document.getElementById("loginMore");
-      if (more) more.open = true;
-      setLoginStatus("提示：登录 doubao.com 后，按 F12 打开控制台，输入下面这行回车即可复制全部 Cookie：\ncopy(document.cookie)", null);
-    });
-
-    // 恢复上次的 token（12 小时内有效）
-    try { state.token = localStorage.getItem(TOKEN_KEY) || ""; } catch (e) {}
-    // 点登录图标：已登录就退出登录态，未登录就打开登录界面
-    if (loginBtn) loginBtn.addEventListener("click", function () {
-      if (state.token) {
-        state.token = ""; state.live = false;
-        try { localStorage.removeItem(TOKEN_KEY); } catch (x) {}
-        fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: "" }) }).catch(function () {});
-        toast("已退出登录，回到公开作品");
-        refresh();
-      } else {
-        showLogin("");
-      }
+    // 站主设置相关事件
+    if (ownerSubmit) ownerSubmit.addEventListener("click", submitOwner);
+    if (ownerLogout) ownerLogout.addEventListener("click", logoutOwner);
+    if (ownerClose) ownerClose.addEventListener("click", closeOwner);
+    if (ownerBtn) ownerBtn.addEventListener("click", openOwner);
+    if (ownerPanel) {
+      ownerPanel.addEventListener("click", function (e) {
+        if (e.target === ownerPanel) closeOwner();   // 点遮罩空白处关闭
+      });
+    }
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && ownerPanel && !ownerPanel.hidden) closeOwner();
     });
 
     document.getElementById("tabs").addEventListener("click", function (e) {

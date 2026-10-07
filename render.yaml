@@ -1,12 +1,16 @@
-# 用于 Render.com（免费 Web Service）
-# 把本仓库连到 Render 即可，平台会把端口注入环境变量 PORT。
+# Render.com 蓝图（Blueprint）配置
+# 用法：Render 后台 → New → Blueprint → 选本仓库，平台自动识别本文件
 services:
   - type: web
     name: chuangzuo-square
     runtime: python
     plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python server.py"
+    # 无第三方依赖，装 requirements.txt 很快
+    buildCommand: pip install -r requirements.txt
+    # server.py 已读 os.environ['PORT'] 并绑定 0.0.0.0
+    startCommand: python server.py
+    healthCheckPath: /api/status
+    autoDeploy: true
     envVars:
-      - key: PORT
-        value: "10000"
+      - key: PYTHON_VERSION
+        value: "3.11.9"

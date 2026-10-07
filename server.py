@@ -2,15 +2,23 @@
 """
 创作广场 · 实时直连服务
 =====================================================
-一个文件搞定：静态网页 + 豆包接口代理（同域，绕开 CORS）。
+一个文件搞定：静态网页 + 豆包接口代理（同域，绕开 CORS / 防盗链）。
 
-  http://127.0.0.1:8788/                  -> 网页
-  GET  /api/works                         -> 作品链接列表（works.json）
-  POST /api/works   {"url": "分享链接"}    -> 添加作品链接
-  GET  /api/resolve?share_id=&vid=        -> 实时调用豆包，返回视频/作者/提示词
-  GET  /api/stream?url=<编码后地址>        -> 代理视频/封面流（解决 CDN Referer 限制）
+  GET  /                        -> 网页
+  GET  /api/status              -> 实时广场是否已开通
+  GET  /api/feed?cursor=&count= -> 实时广场信息流（需要站主已配置登录态）
+  POST /api/owner/login  {cookie} -> 站主贴一次豆包 Cookie，全站生效（只存内存）
+  POST /api/owner/logout         -> 关闭实时广场
+  GET  /api/works                -> 公开作品墙（降级用）
+  POST /api/works  {"url": ...}  -> 添加公开作品链接
+  GET  /api/resolve?share_id=&vid= -> 实时调用豆包，返回视频/作者/提示词
+  GET  /api/stream?url=<编码地址>   -> 代理视频/封面（解决 CDN Referer 防盗链）
 
-只用 Python 标准库，零依赖。双击「本地预览.bat」即可。
+为什么是「站主共享一份登录态」而不是「每人登录各的」？
+  手机没有 F12 取不到自己的 Cookie，且豆包 passport 登录接口对服务端
+  返回 error_code:16（App 专属风控）。详见 _old/接口实测结论-最终版.md
+
+只用 Python 标准库，零依赖。渲染平台读 $PORT，本地默认 8788。
 """
 
 import base64
@@ -173,31 +181,33 @@ def resolve(sid, vid):
     return result
 
 
-# ---------------- 用户自带账号：feed 实时读取 ----------------
-# 会话：token -> cookie 字符串。每个访问者用自己账号登录后，服务端只保留
-# 该访问者的 cookie，且只用于替它拉 feed，不混用、不落盘明文（内存即可，重启失效）。
-SESSIONS = {}
-SESSION_TTL = 3600 * 12  # 12 小时
+# ---------------- 登录态 ----------------
+# 为什么是「站主共享一份」而不是「每个访问者各登录各的」？
+#   实测结论见 _old/接口实测结论-最终版.md
+#   1) 豆包所有 passport 登录接口（短信/扫码）统一返回 error_code:16「请使用应用权限」，
+#      服务端无法代替用户完成登录；
+#   2) 游客会话（ttwid + hook_slardar_session_id）对 /api/ 无效，仍 401；
+#   3) 手机浏览器没有 F12，取不到自己的 Cookie。
+#   => 「每个访问者在手机上登录自己的账号」技术上不成立。
+# 落地形态：站主在电脑浏览器登录一次，把 Cookie 贴进来（只存内存）；
+#           所有访客无需登录，直接实时看广场。Cookie 过期后站主再贴一次。
+OWNER_COOKIE = {"v": "", "at": 0.0}
+FEED_CACHE = {"at": 0.0, "items": [], "cursor": ""}
+FEED_TTL = 180  # 广场列表缓存 3 分钟：既实时又不打爆豆包
 
 
-def new_session(cookie):
-    token = base64.urlsafe_b64encode(os.urandom(24)).decode().rstrip("=")
-    SESSIONS[token] = [time.time(), cookie]
-    return token
+def set_owner_cookie(cookie):
+    OWNER_COOKIE["v"] = cookie
+    OWNER_COOKIE["at"] = time.time()
+    FEED_CACHE["at"] = 0.0  # 立刻失效，下次请求重新拉
 
 
-def get_session(token):
-    s = SESSIONS.get(token)
-    if not s:
-        return None
-    if (time.time() - s[0]) > SESSION_TTL:
-        SESSIONS.pop(token, None)
-        return None
-    return s[1]
+def owner_cookie():
+    return OWNER_COOKIE["v"] or ""
 
 
-def drop_session(token):
-    SESSIONS.pop(token, None)
+def owner_ready():
+    return bool(OWNER_COOKIE["v"])
 
 
 def _pick(d, *keys):
@@ -268,7 +278,8 @@ def extract_works(node, out):
 
 
 def feed_works(cookie, cursor="", count=20):
-    """用用户 cookie 调豆包 feed 接口，返回作品列表。"""
+    """用站主的 cookie 调豆包广场 feed 接口，返回作品列表。
+    结构未知 => extract_works 走启发式递归，尽量把视频和提示词都捞出来。"""
     url = FEED + "?" + Q + ("&cursor=" + urllib.parse.quote(str(cursor)) if cursor else "") \
         + "&count=%d&pull_type=feed" % count
     body = json.dumps({"cursor": str(cursor), "count": count, "pull_type": "feed"}).encode("utf-8")
@@ -285,21 +296,37 @@ def feed_works(cookie, cursor="", count=20):
         j = json.loads(raw)
     except Exception as e:
         return {"ok": False, "error": "请求豆包失败 %s" % e, "need_login": False}
-    # 401 => cookie 失效
-    if j.get("code") in (401, 710010204) or not j.get("data"):
-        # 有些返回 code 200 但 data 为空也可能是没登录
-        return {"ok": False, "error": "豆包返回 code=%s msg=%s（登录可能已失效）"
-                % (j.get("code"), j.get("msg", "")), "need_login": True}
+    # code=0 才是成功；401 / 登录态失效都归为 need_login
+    if j.get("code") != 0 or not j.get("data"):
+        return {"ok": False, "need_login": True,
+                "error": "豆包返回 code=%s msg=%s（登录态可能已失效）"
+                         % (j.get("code"), j.get("msg", ""))}
     works = []
     extract_works(j.get("data"), works)
-    # 拿下一页游标
+    for w in works:
+        w.pop("_v", None)
     next_cursor = ""
     d = j.get("data")
     if isinstance(d, dict):
         next_cursor = str(_pick(d, "cursor", "next_cursor", "has_more_cursor") or "")
-    for w in works:
-        w.pop("_v", None)
-    return {"ok": True, "items": works, "cursor": next_cursor, "raw_code": j.get("code")}
+    return {"ok": True, "items": works, "cursor": next_cursor}
+
+
+def public_feed(cursor="", count=20):
+    """给访客的广场接口：有站主登录态就实时拉，没有就明确告诉他未开通。"""
+    ck = owner_cookie()
+    if not ck:
+        return {"ok": False, "need_owner": True,
+                "error": "站主还没配置豆包登录态，当前展示的是公开作品墙"}
+    # 首页走缓存，翻页实时拉
+    if not cursor and (time.time() - FEED_CACHE["at"]) < FEED_TTL and FEED_CACHE["items"]:
+        return {"ok": True, "items": FEED_CACHE["items"], "cursor": FEED_CACHE["cursor"], "cached": True}
+    res = feed_works(ck, cursor, count)
+    if res.get("ok") and not cursor:
+        FEED_CACHE["items"] = res["items"]
+        FEED_CACHE["cursor"] = res["cursor"]
+        FEED_CACHE["at"] = time.time()
+    return res
 
 
 # ---------------- HTTP ----------------
@@ -337,18 +364,16 @@ class Handler(SimpleHTTPRequestHandler):
             return self.stream(u)
 
         if path == "/api/feed":
-            token = q.get("token", [""])[0] or self.headers.get("X-Session", "")
-            cookie = get_session(token)
-            if not cookie:
-                return self._json({"ok": False, "need_login": True,
-                                   "error": "未登录或登录已过期，请重新登录"}, 401)
             cursor = q.get("cursor", [""])[0]
             count = int(q.get("count", ["20"])[0] or 20)
-            return self._json(feed_works(cookie, cursor, count))
+            return self._json(public_feed(cursor, count))
 
-        if path == "/api/session":
-            token = q.get("token", [""])[0] or self.headers.get("X-Session", "")
-            return self._json({"ok": bool(get_session(token))})
+        if path == "/api/status":
+            return self._json({
+                "ok": True,
+                "live": owner_ready(),
+                "note": "实时广场已开通" if owner_ready() else "当前为公开作品墙（站主未配置登录态）",
+            })
 
         if path == "/" or path == "":
             self.path = "/index.html"
@@ -356,7 +381,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/api/login":
+        if parsed.path == "/api/owner/login":
+            # 站主贴 Cookie：验证一次能拉到广场才收，避免存了废的
             try:
                 n = int(self.headers.get("Content-Length", "0"))
                 j = json.loads(self.rfile.read(n).decode("utf-8"))
@@ -365,20 +391,18 @@ class Handler(SimpleHTTPRequestHandler):
             cookie = (j or {}).get("cookie", "").strip()
             if not cookie or "=" not in cookie:
                 return self._json({"ok": False, "error": "没有拿到 Cookie"}, 400)
-            # 先用这份 cookie 试拉一次 feed，验证是否真能登录
-            res = feed_works(cookie, "", 5)
+            res = feed_works(cookie, "", 10)
             if not res.get("ok"):
-                return self._json({"ok": False, "need_login": True,
-                                   "error": res.get("error", "登录验证失败")}, 401)
-            token = new_session(cookie)
-            return self._json({"ok": True, "token": token, "sample": len(res.get("items", []))})
-        if parsed.path == "/api/logout":
-            try:
-                n = int(self.headers.get("Content-Length", "0"))
-                j = json.loads(self.rfile.read(n).decode("utf-8"))
-            except Exception:
-                j = {}
-            drop_session((j or {}).get("token", ""))
+                return self._json({"ok": False, "error": res.get("error", "验证失败"),
+                                   "tip": "请确认这段 Cookie 来自已登录的 doubao.com 网页"}, 400)
+            set_owner_cookie(cookie)
+            return self._json({"ok": True, "count": len(res.get("items", []))})
+        if parsed.path == "/api/owner/logout":
+            OWNER_COOKIE["v"] = ""
+            OWNER_COOKIE["at"] = 0.0
+            FEED_CACHE["items"] = []
+            FEED_CACHE["cursor"] = ""
+            FEED_CACHE["at"] = 0.0
             return self._json({"ok": True})
         if parsed.path == "/api/works":
             try:

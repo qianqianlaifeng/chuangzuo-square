@@ -316,3 +316,51 @@ button { font-family: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ================= 站主设置（替换原登录遮罩） ================= */
+.login-x {
+  position: absolute; top: 10px; right: 10px;
+  width: 30px; height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%;
+  background: #f1f3f6; color: #5b6472; cursor: pointer;
+}
+.login-x:hover { background: #e7eaef; }
+
+.login-live {
+  margin: 12px 0 14px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #f4f6f9;
+  color: #6b7480;
+  font-size: 12.5px; line-height: 1.55;
+}
+.login-live.is-on { background: #e8f7ee; color: #14804a; font-weight: 600; }
+
+.login-steps {
+  margin: 0 0 14px; padding: 0 0 0 20px;
+  text-align: left;
+  font-size: 12.5px; line-height: 1.75; color: #4a5260;
+}
+.login-steps li { margin-bottom: 7px; }
+.login-steps b { color: #16191f; }
+.login-steps a { color: #1a6dff; }
+
+.login-code {
+  display: inline-block; margin-top: 5px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: #1f2430; color: #7ee787;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; user-select: all;
+}
+
+.login-off {
+  margin-top: 12px; padding: 0;
+  border: 0; background: none;
+  color: #a2a9b4; font-size: 12px; cursor: pointer;
+  text-decoration: underline;
+}
+.login-off:hover { color: #d0483c; }
+
+.btn[disabled] { opacity: .6; cursor: default; }
