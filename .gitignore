@@ -1,0 +1,11 @@
+# 截图与临时脚本，不入库
+_shot.js
+shot-*.png
+*.log
+.DS_Store
+Thumbs.db
+
+# 历史方案与探测产物（不入库）
+_old/
+__pycache__/
+*.pyc

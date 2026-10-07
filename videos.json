@@ -1,0 +1,23 @@
+{
+  "updated": "2026-10-07 10:12",
+  "count": 1,
+  "items": [
+    {
+      "share_id": "41356597786354690",
+      "vid": "v0d69cg10004d6978e2ljht0i4fdpp00",
+      "author": "胜泓服饰",
+      "accent": "#0ea5e9",
+      "prompt": "帮我生成一个视频：模特左手举手机挡脸，右手轻撩长发。镜头缓慢推向人物上半身，她右手叉腰再自然放下，随后侧身展示服装细节后转回正面，动作流畅自然，高清画质。模型 2.0，原比例，时长 5s。",
+      "duration": "5s",
+      "model": "Seedance 2.0",
+      "width": 720,
+      "height": 1280,
+      "definition": "720p",
+      "video": "assets/video/41356597786354690.mp4",
+      "remote_video": "https://v26-videoweb.doubao.com/1a46c56fadc1aaf86d53d9c5f333af76/6acee528/video/tos/cn/tos-cn-v-9ecd54/oA0yeBydIpTAA5I0QcFSogITX49ELmKjXQ24os/?a=497858&ch=0&cr=7&dr=3&er=0&lr=video_gen_watermark_dyn&cd=0%7C0%7C0%7C1&cv=1&br=1168&bt=1168&cs=4&ds=3&ft=vTVAHK~cBBkq8Zmo7Flqk_vjVQWw&mime_type=video_mp4&qs=0&rc=Z2Y6N2c8ZjQ5PDY1Nzw1OkBpM3NnNzNrb2g6OTczNGY5M0BjYy8xNTVhXmAxYDEwYC1gYSMtbWNmcWcvNTZhLS1kNmFzcw%3D%3D&btag=c0000e00008000&dy_q=1791339171&feature_id=69cf4d54330f6bae1a6020ae7be8c417&l=20261007101251711B3B159A82C316E81F&download=true",
+      "poster": "assets/poster/41356597786354690.jpg",
+      "poster_remote": "https://p26-sign.douyinpic.com/tos-cn-p-9ecd54/oM0VmfkIcAyITI94Bg5QjHGBky02QmKs6o64sA~tplv-noop.image?dy_q=1791339171&l=20261007101251711B3B159A82C316E81F&x-expires=1791943976&x-signature=26D3R2NnctECuNkSzxS0St%2F8HI0%3D",
+      "source_url": "https://www.doubao.com/video-sharing?share_id=41356597786354690&video_id=v0d69cg10004d6978e2ljht0i4fdpp00"
+    }
+  ]
+}

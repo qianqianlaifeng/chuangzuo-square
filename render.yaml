@@ -1,0 +1,12 @@
+# 用于 Render.com（免费 Web Service）
+# 把本仓库连到 Render 即可，平台会把端口注入环境变量 PORT。
+services:
+  - type: web
+    name: chuangzuo-square
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python server.py"
+    envVars:
+      - key: PORT
+        value: "10000"

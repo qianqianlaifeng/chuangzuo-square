@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="format-detection" content="telephone=no">
+<title>创作广场 · 视频</title>
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <header class="topbar">
+    <nav class="tabs" id="tabs">
+      <button class="tab" data-tab="discover" type="button">发现</button>
+      <button class="tab is-active" data-tab="video" type="button">视频</button>
+      <button class="tab" data-tab="ecom" type="button">带货模板</button>
+      <button class="tab" data-tab="pimg" type="button">P图</button>
+      <button class="tab" data-tab="pet" type="button">萌宠</button>
+    </nav>
+    <button class="icon-btn" id="refreshBtn" type="button" aria-label="刷新">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-.6 3"></path><path d="M20 5v6h-6"></path></svg>
+    </button>
+    <button class="icon-btn" id="addBtn" type="button" aria-label="添加作品">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>
+    <button class="icon-btn" id="searchBtn" type="button" aria-label="搜索">
+      <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+    </button>
+  </header>
+
+  <main class="feed" id="feed">
+    <div class="grid" id="grid"></div>
+    <section class="panel" id="panel" hidden>
+      <div class="panel-ico">🎬</div>
+      <div class="panel-title" id="panelTitle">「发现」频道</div>
+      <p class="panel-sub" id="panelSub">这个频道的内容在豆包 App 里，网页版目前只收录「视频」广场的真实作品。</p>
+      <button class="panel-back" id="panelBack" type="button">回到「视频」</button>
+    </section>
+    <div class="skeleton" id="skeleton">
+      <div class="sk-card"><div class="sk-thumb"></div><div class="sk-line"></div></div>
+      <div class="sk-card"><div class="sk-thumb tall"></div><div class="sk-line"></div></div>
+      <div class="sk-card"><div class="sk-thumb tall"></div><div class="sk-line"></div></div>
+      <div class="sk-card"><div class="sk-thumb"></div><div class="sk-line"></div></div>
+    </div>
+  </main>
+
+  <footer class="bottombar">
+    <div class="updated" id="updated"></div>
+    <div class="chips" id="chips">
+      <button class="chip" data-tip="豆包 P 图" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"></path><path d="M17 15l2 2 3-4"></path></svg>
+        豆包P图</button>
+      <button class="chip" data-tip="图片生成" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="8.5" cy="9.5" r="1.6"></circle><path d="M20 16l-4.5-4.5L7 20"></path></svg>
+        图片生成</button>
+      <button class="chip" data-tip="照片动起来" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M15.5 4H18a2 2 0 0 1 2 2v2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5M8.5 20H6a2 2 0 0 1-2-2v-2.5"></path><circle cx="12" cy="12" r="2.4"></circle></svg>
+        照片动起来</button>
+      <button class="chip" data-tip="视频生成" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="12" height="12" rx="2.4"></rect><path d="M15 10.5l5-3v9l-5-3z"></path></svg>
+        视频生成</button>
+    </div>
+    <form class="composer" id="composer" onsubmit="return false">
+      <input class="composer-input" id="composerInput" placeholder="描述你想要创作的内容..." readonly>
+      <button class="round-btn" type="button" aria-label="语音输入">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"></path></svg>
+      </button>
+      <button class="round-btn round-btn--primary" type="button" aria-label="更多">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+      </button>
+    </form>
+  </footer>
+
+</div>
+
+<div class="detail" id="detail" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="assets/site.js"></script>
+</body>
+</html>
